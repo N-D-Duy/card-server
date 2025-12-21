@@ -27,8 +27,10 @@ public class ActivateCardEndpoint implements EndpointHandler {
         }
 
         String cardId = parts[parts.length - 2]; // Second to last (before "activate")
-        String sql = "UPDATE card_keys SET status = 1 WHERE card_id = ?";
-        int affected = dbManager.update(sql, cardId);
+        // Normalize cardId từ request: bỏ khoảng trắng để so sánh
+        String normalizedCardId = cardId.replaceAll("\\s+", "");
+        String sql = "UPDATE card_keys SET status = 1 WHERE REPLACE(card_id, ' ', '') = ?";
+        int affected = dbManager.update(sql, normalizedCardId);
         
         Map<String, Object> data = new HashMap<>();
         data.put("affected", affected);

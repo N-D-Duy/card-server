@@ -26,8 +26,13 @@ public class GetStaffIdEndpoint implements EndpointHandler {
         }
         String cardId = parts[3];
         
-        String sql = "SELECT staff_id FROM card_keys WHERE card_id = ? AND status = 1";
-        HashMap<String, Object> result = dbManager.queryOne(sql, cardId);
+        // Normalize cardId từ request: bỏ khoảng trắng để so sánh
+        // DB lưu dưới dạng "XX XX XX", request có thể là "XXXXXX" hoặc "XX XX XX"
+        String normalizedCardId = cardId.replaceAll("\\s+", "");
+        
+        // Query: normalize cả cardId trong DB để so sánh (bỏ khoảng trắng)
+        String sql = "SELECT staff_id FROM card_keys WHERE REPLACE(card_id, ' ', '') = ? AND status = 1";
+        HashMap<String, Object> result = dbManager.queryOne(sql, normalizedCardId);
         
         if (result == null) {
             return Response.notFound("Card not found or inactive: " + cardId);

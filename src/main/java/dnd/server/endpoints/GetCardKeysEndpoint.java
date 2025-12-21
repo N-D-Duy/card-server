@@ -28,8 +28,10 @@ public class GetCardKeysEndpoint implements EndpointHandler {
         }
 
         String cardId = parts[parts.length - 2]; // Second to last (before "keys")
-        String sql = "SELECT public_key_rsa, static_key_encrypted, static_key_iv FROM card_keys WHERE card_id = ? AND status = 1";
-        HashMap<String, Object> row = dbManager.queryOne(sql, cardId);
+        // Normalize cardId từ request: bỏ khoảng trắng để so sánh
+        String normalizedCardId = cardId.replaceAll("\\s+", "");
+        String sql = "SELECT public_key_rsa, static_key_encrypted, static_key_iv FROM card_keys WHERE REPLACE(card_id, ' ', '') = ? AND status = 1";
+        HashMap<String, Object> row = dbManager.queryOne(sql, normalizedCardId);
         
         if (row == null) {
             return Response.notFound("Card not found");

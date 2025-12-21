@@ -28,8 +28,11 @@ public class GetCardEndpoint implements EndpointHandler {
         }
 
         String cardId = parts[parts.length - 1];
-        String sql = "SELECT * FROM card_keys WHERE card_id = ? AND status = 1";
-        HashMap<String, Object> row = dbManager.queryOne(sql, cardId);
+        // Normalize cardId từ request: bỏ khoảng trắng để so sánh
+        // DB lưu dưới dạng "XX XX XX", request có thể là "XXXXXX" hoặc "XX XX XX"
+        String normalizedCardId = cardId.replaceAll("\\s+", "");
+        String sql = "SELECT * FROM card_keys WHERE REPLACE(card_id, ' ', '') = ? AND status = 1";
+        HashMap<String, Object> row = dbManager.queryOne(sql, normalizedCardId);
         
         if (row == null) {
             return Response.notFound("Card not found");

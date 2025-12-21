@@ -24,8 +24,10 @@ public class UpdateCardLastAuthEndpoint implements EndpointHandler {
         }
 
         String cardId = parts[parts.length - 2]; // Second to last (before "last-auth")
-        String sql = "UPDATE card_keys SET last_auth_at = CURRENT_TIMESTAMP WHERE card_id = ?";
-        int affected = dbManager.update(sql, cardId);
+        // Normalize cardId từ request: bỏ khoảng trắng để so sánh
+        String normalizedCardId = cardId.replaceAll("\\s+", "");
+        String sql = "UPDATE card_keys SET last_auth_at = CURRENT_TIMESTAMP WHERE REPLACE(card_id, ' ', '') = ?";
+        int affected = dbManager.update(sql, normalizedCardId);
         
         if (affected > 0) {
             return Response.success("Last auth time updated");

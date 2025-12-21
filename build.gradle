@@ -1,0 +1,49 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'dnd'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+application {
+    mainClass = 'dnd.server.MedCardServer'
+}
+
+dependencies {
+    // Database connection pooling
+    implementation 'com.zaxxer:HikariCP:7.0.2'
+    
+    // MySQL connector
+    implementation 'com.mysql:mysql-connector-j:9.5.0'
+    
+    // JSON processing (Gson)
+    implementation 'com.google.code.gson:gson:2.10.1'
+    
+    // Netty for HTTP server
+    implementation 'io.netty:netty-all:4.1.104.Final'
+    
+    // Bouncy Castle cho cryptography
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
+}
+
+// Copy db.properties vào build/resources
+processResources {
+    from('../db.properties') {
+        into('.')
+    }
+}
+
+// Task để chạy server
+tasks.register('runServer', JavaExec) {
+    group = 'application'
+    description = 'Run MedCard Server'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'dnd.server.MedCardServer'
+    args = ['8888'] // Default port
+}

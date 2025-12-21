@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Debug MedCardServer",
+      "request": "launch",
+      "mainClass": "dnd.server.MedCardServer",
+      "projectName": "MedCardServer",
+      "vmArgs": "-Dfile.encoding=UTF-8"
+    }
+  ]
+}
+

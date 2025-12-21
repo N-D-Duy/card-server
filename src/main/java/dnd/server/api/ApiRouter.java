@@ -39,6 +39,8 @@ public class ApiRouter {
         routes.put("GET /api/prescriptions/:id", new PrescriptionDetailEndpoint(dbManager));
         routes.put("POST /api/prescriptions", new CreatePrescriptionEndpoint(dbManager));
         routes.put("PUT /api/prescriptions/:id", new UpdatePrescriptionEndpoint(dbManager));
+        routes.put("GET /api/prescriptions/:id/qr-code", new dnd.server.endpoints.GetPrescriptionQrEndpoint(dbManager));
+        routes.put("GET /api/prescriptions/:id/payment-status", new dnd.server.endpoints.GetPrescriptionPaymentStatusEndpoint(dbManager));
         
         // Inventory endpoints
         routes.put("GET /api/inventory/logs", new InventoryLogsEndpoint(dbManager));
@@ -96,6 +98,9 @@ public class ApiRouter {
         
         // Health check
         routes.put("GET /api/health", new HealthCheckEndpoint(dbManager));
+        
+        // Bank transaction endpoint
+        routes.put("POST /api/transactions", new dnd.server.endpoints.TransactionEndpoint(dbManager));
     }
 
     /**

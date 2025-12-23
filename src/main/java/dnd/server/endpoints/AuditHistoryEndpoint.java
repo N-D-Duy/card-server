@@ -30,7 +30,7 @@ public class AuditHistoryEndpoint implements EndpointHandler {
         String sql = """
                 SELECT 
                     id,
-                    session_id,
+                    NULL as session_id,
                     timestamp,
                     result,
                     staff_id

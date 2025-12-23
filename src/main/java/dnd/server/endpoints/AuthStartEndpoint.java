@@ -39,6 +39,12 @@ public class AuthStartEndpoint implements EndpointHandler {
         
         String cardId = body.get("cardId").getAsString();
         
+        // Bypass nếu cardId toàn 0 (thẻ reset/chưa nạp) để tránh lỗi
+        String normalized = cardId.replaceAll("\\s+", "").toUpperCase();
+        if (normalized.matches("^0+$")) {
+            return Response.success("Card empty, bypass", new HashMap<>());
+        }
+        
         // Bắt đầu authentication
         AuthenticationService.AuthStartResult result = authService.startAuthentication(cardId);
         

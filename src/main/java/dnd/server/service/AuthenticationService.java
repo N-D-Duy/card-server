@@ -3,7 +3,6 @@ package dnd.server.service;
 import dnd.server.crypto.CryptoUtils;
 import dnd.server.db.CardKeyDao;
 import dnd.server.db.CardSessionDao;
-import dnd.server.util.HexUtils;
 
 import java.security.SecureRandom;
 import java.sql.Timestamp;

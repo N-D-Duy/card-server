@@ -53,36 +53,44 @@ public class TransactionEndpoint implements EndpointHandler {
 
     @Override
     public Response handle(Request request) throws Exception {
-        // Verify HMAC signature
-        String signature = request.headers != null ? request.headers.get("X-Signature") : null;
-        if (signature == null || signature.trim().isEmpty()) {
-            return Response.error(401, "X-Signature header is required");
-        }
-
-        if (hmacSecret == null || hmacSecret.isEmpty()) {
-            logger.severe("HMAC_SECRET is not configured");
-            return Response.error(500, "Server HMAC secret missing");
-        }
-
-        // Get request body as JSON string for HMAC verification
         JsonObject body = request.getBody();
         if (body == null) {
             return Response.badRequest("Request body is required");
         }
 
-        // Convert body to JSON string (same format as Node.js JSON.stringify)
-        Gson gson = new Gson();
-        String bodyJson = gson.toJson(body);
+        String paymentMethod = body.has("paymentMethod") ? body.get("paymentMethod").getAsString() : "qr";
+        boolean isCash = "cash".equalsIgnoreCase(paymentMethod);
 
-        // Verify signature
-        String expectedSignature = HmacUtils.hmacSha256Base64(hmacSecret, bodyJson);
-        if (!HmacUtils.timingSafeEqual(signature.trim(), expectedSignature)) {
-            logger.warning("Invalid HMAC signature");
-            return Response.error(401, "Invalid signature");
+        // Với thanh toán tiền mặt (do client nội bộ gọi), bỏ qua HMAC
+        if (!isCash) {
+            // Verify HMAC signature cho giao dịch QR từ bank server
+            String signature = request.headers != null ? request.headers.get("X-Signature") : null;
+            if (signature == null || signature.trim().isEmpty()) {
+                return Response.error(401, "X-Signature header is required");
+            }
+
+            if (hmacSecret == null || hmacSecret.isEmpty()) {
+                logger.severe("HMAC_SECRET is not configured");
+                return Response.error(500, "Server HMAC secret missing");
+            }
+
+            // Convert body to JSON string (same format as Node.js JSON.stringify)
+            Gson gson = new Gson();
+            String bodyJson = gson.toJson(body);
+
+            // Verify signature
+            String expectedSignature = HmacUtils.hmacSha256Base64(hmacSecret, bodyJson);
+            if (!HmacUtils.timingSafeEqual(signature.trim(), expectedSignature)) {
+                logger.warning("Invalid HMAC signature");
+                return Response.error(401, "Invalid signature");
+            }
         }
 
         // Parse request body
         String bankId = body.has("bankId") ? body.get("bankId").getAsString() : null;
+        if (bankId == null || bankId.isEmpty()) {
+            bankId = isCash ? "CASH" : null;
+        }
         if (bankId == null || bankId.isEmpty()) {
             return Response.badRequest("bankId is required");
         }
@@ -101,23 +109,30 @@ public class TransactionEndpoint implements EndpointHandler {
             return Response.badRequest("ref is required");
         }
 
+        long timestamp;
         if (!body.has("timestamp") || !body.get("timestamp").isJsonPrimitive()) {
-            return Response.badRequest("timestamp is required");
+            timestamp = System.currentTimeMillis();
+        } else {
+            timestamp = body.get("timestamp").getAsLong();
         }
-        long timestamp = body.get("timestamp").getAsLong();
         if (timestamp <= 0) {
             return Response.badRequest("timestamp invalid");
         }
 
         String idempotencyKey = body.has("idempotencyKey") ? body.get("idempotencyKey").getAsString() : null;
         if (idempotencyKey == null || idempotencyKey.isEmpty()) {
-            return Response.badRequest("idempotencyKey is required");
+            // Cho tiền mặt có thể không truyền, tự tạo để tránh duplicate
+            if (isCash) {
+                idempotencyKey = "cash-" + ref + "-" + timestamp;
+            } else {
+                return Response.badRequest("idempotencyKey is required");
+            }
         }
 
         String content = body.has("content") && !body.get("content").isJsonNull() 
             ? body.get("content").getAsString() : null;
-        String playerId = body.has("playerId") && !body.get("playerId").isJsonNull()
-            ? body.get("playerId").getAsString() : null;
+        String staffId = body.has("staffId") && !body.get("staffId").isJsonNull()
+            ? body.get("staffId").getAsString() : null;
 
         // Ensure transactions table exists
         ensureTransactionsTableExists();
@@ -135,10 +150,10 @@ public class TransactionEndpoint implements EndpointHandler {
 
         // Insert transaction
         String insertSql = """
-            INSERT INTO transactions (bank_id, amount, ref, content, player_id, ts_ms, idempotency_key, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+            INSERT INTO transactions (bank_id, amount, ref, content, staff_id, ts_ms, idempotency_key, payment_method, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
             """;
-        Long transactionId = dbManager.insertAndGetId(insertSql, bankId, amount, ref, content, playerId, timestamp, idempotencyKey);
+        Long transactionId = dbManager.insertAndGetId(insertSql, bankId, amount, ref, content, staffId, timestamp, idempotencyKey, paymentMethod.toLowerCase());
 
         if (transactionId == null) {
             return Response.internalError("Failed to insert transaction");
@@ -158,13 +173,10 @@ public class TransactionEndpoint implements EndpointHandler {
 
         // Update audit_history
         try {
-            String auditDescription = String.format("Bank transaction: %s - Amount: %d - Ref: %s", 
-                bankId, amount, ref);
+            String auditDescription = String.format("Transaction [%s]: Amount: %d - Ref: %s - Method: %s", 
+                bankId, amount, ref, paymentMethod);
             if (content != null && !content.isEmpty()) {
                 auditDescription += " - Content: " + content;
-            }
-            if (playerId != null && !playerId.isEmpty()) {
-                auditDescription += " - Player: " + playerId;
             }
             if (prescriptionId != null) {
                 auditDescription += " - Prescription: " + prescriptionId;
@@ -174,7 +186,7 @@ public class TransactionEndpoint implements EndpointHandler {
                 INSERT INTO audit_history (session_id, timestamp, result, staff_id)
                 VALUES (?, NOW(), ?, ?)
                 """;
-            dbManager.update(auditSql, "BANK_TXN_" + transactionId, auditDescription, playerId);
+            dbManager.update(auditSql, "BANK_TXN_" + transactionId, auditDescription, staffId);
         } catch (Exception e) {
             // Log error but don't fail transaction
             logger.warning("Failed to update audit_history: " + e.getMessage());
@@ -186,9 +198,9 @@ public class TransactionEndpoint implements EndpointHandler {
                 INSERT INTO system_logs (action, admin_staff_id, description, created_at)
                 VALUES (?, ?, ?, NOW())
                 """;
-            String logDescription = String.format("Bank transaction processed: ID=%d, Bank=%s, Amount=%d, Ref=%s", 
-                transactionId, bankId, amount, ref);
-            dbManager.update(systemLogSql, "BANK_TRANSACTION", playerId, logDescription);
+            String logDescription = String.format("Transaction processed: ID=%d, Bank=%s, Amount=%d, Ref=%s, Method=%s", 
+                transactionId, bankId, amount, ref, paymentMethod);
+            dbManager.update(systemLogSql, "BANK_TRANSACTION", staffId, logDescription);
         } catch (Exception e) {
             // Log error but don't fail transaction
             logger.warning("Failed to update system_logs: " + e.getMessage());
@@ -213,18 +225,27 @@ public class TransactionEndpoint implements EndpointHandler {
                     amount BIGINT NOT NULL,
                     ref VARCHAR(191) NOT NULL,
                     content TEXT NULL,
-                    player_id VARCHAR(64) NULL,
+                    staff_id VARCHAR(64) NULL,
                     ts_ms BIGINT NOT NULL,
                     idempotency_key VARCHAR(191) NOT NULL,
+                    payment_method VARCHAR(16) NOT NULL DEFAULT 'qr',
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (id),
                     UNIQUE KEY uniq_idem (idempotency_key),
                     INDEX idx_bank (bank_id),
-                    INDEX idx_player (player_id),
+                    INDEX idx_staff (staff_id),
+                    INDEX idx_method (payment_method),
                     INDEX idx_created (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """;
             dbManager.update(createTableSql);
+
+            // Thêm cột nếu bảng cũ thiếu
+            try { dbManager.update("ALTER TABLE transactions ADD COLUMN staff_id VARCHAR(64) NULL"); } catch (Exception ignore) {}
+            try { dbManager.update("ALTER TABLE transactions DROP COLUMN player_id"); } catch (Exception ignore) {}
+            try { dbManager.update("ALTER TABLE transactions ADD COLUMN payment_method VARCHAR(16) NOT NULL DEFAULT 'qr'"); } catch (Exception ignore) {}
+            try { dbManager.update("CREATE INDEX idx_staff ON transactions(staff_id)"); } catch (Exception ignore) {}
+            try { dbManager.update("CREATE INDEX idx_method ON transactions(payment_method)"); } catch (Exception ignore) {}
         } catch (Exception e) {
             // Table might already exist, ignore
             logger.fine("Transactions table check: " + e.getMessage());

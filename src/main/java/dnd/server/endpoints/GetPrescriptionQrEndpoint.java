@@ -97,4 +97,3 @@ public class GetPrescriptionQrEndpoint implements EndpointHandler {
         return Response.success(data);
     }
 }
-

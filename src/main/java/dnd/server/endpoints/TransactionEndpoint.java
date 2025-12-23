@@ -171,23 +171,15 @@ public class TransactionEndpoint implements EndpointHandler {
             }
         }
 
-        // Update audit_history
+        // Update audit_history (result column ở DB là numeric, dùng 1 cho thành công)
         try {
-            String auditDescription = String.format("Transaction [%s]: Amount: %d - Ref: %s - Method: %s", 
-                bankId, amount, ref, paymentMethod);
-            if (content != null && !content.isEmpty()) {
-                auditDescription += " - Content: " + content;
-            }
-            if (prescriptionId != null) {
-                auditDescription += " - Prescription: " + prescriptionId;
-            }
-
             // Một số DB không có cột session_id trong audit_history -> chỉ ghi các trường cơ bản
             String auditSql = """
                 INSERT INTO audit_history (timestamp, result, staff_id)
                 VALUES (NOW(), ?, ?)
                 """;
-            dbManager.update(auditSql, auditDescription, staffId);
+            // result=1 (thành công), chi tiết đã ghi ở system_logs
+            dbManager.update(auditSql, 1, staffId);
         } catch (Exception e) {
             // Log error but don't fail transaction
             logger.warning("Failed to update audit_history: " + e.getMessage());

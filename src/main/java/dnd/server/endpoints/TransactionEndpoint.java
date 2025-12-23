@@ -182,11 +182,12 @@ public class TransactionEndpoint implements EndpointHandler {
                 auditDescription += " - Prescription: " + prescriptionId;
             }
 
+            // Một số DB không có cột session_id trong audit_history -> chỉ ghi các trường cơ bản
             String auditSql = """
-                INSERT INTO audit_history (session_id, timestamp, result, staff_id)
-                VALUES (?, NOW(), ?, ?)
+                INSERT INTO audit_history (timestamp, result, staff_id)
+                VALUES (NOW(), ?, ?)
                 """;
-            dbManager.update(auditSql, "BANK_TXN_" + transactionId, auditDescription, staffId);
+            dbManager.update(auditSql, auditDescription, staffId);
         } catch (Exception e) {
             // Log error but don't fail transaction
             logger.warning("Failed to update audit_history: " + e.getMessage());
@@ -241,11 +242,8 @@ public class TransactionEndpoint implements EndpointHandler {
             dbManager.update(createTableSql);
 
             // Thêm cột nếu bảng cũ thiếu
-            try { dbManager.update("ALTER TABLE transactions ADD COLUMN staff_id VARCHAR(64) NULL"); } catch (Exception ignore) {}
-            try { dbManager.update("ALTER TABLE transactions DROP COLUMN player_id"); } catch (Exception ignore) {}
-            try { dbManager.update("ALTER TABLE transactions ADD COLUMN payment_method VARCHAR(16) NOT NULL DEFAULT 'qr'"); } catch (Exception ignore) {}
-            try { dbManager.update("CREATE INDEX idx_staff ON transactions(staff_id)"); } catch (Exception ignore) {}
-            try { dbManager.update("CREATE INDEX idx_method ON transactions(payment_method)"); } catch (Exception ignore) {}
+            try { dbManager.update("CREATE INDEX IF NOT EXISTS idx_staff ON transactions(staff_id)"); } catch (Exception ignore) {}
+            try { dbManager.update("CREATE INDEX IF NOT EXISTS idx_method ON transactions(payment_method)"); } catch (Exception ignore) {}
         } catch (Exception e) {
             // Table might already exist, ignore
             logger.fine("Transactions table check: " + e.getMessage());

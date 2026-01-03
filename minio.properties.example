@@ -1,0 +1,6 @@
+# MinIO Configuration
+minio.endpoint=minio:9000
+minio.accessKey=minioadmin
+minio.secretKey=minioadmin
+minio.bucket=card
+

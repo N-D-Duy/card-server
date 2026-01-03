@@ -76,6 +76,7 @@ public class ApiRouter {
         routes.put("PUT /api/staff/:id/password", new dnd.server.endpoints.ResetStaffPasswordEndpoint(dbManager));
         routes.put("POST /api/staff/:id/admin", new dnd.server.endpoints.GrantAdminEndpoint(dbManager));
         routes.put("DELETE /api/staff/:id/admin", new dnd.server.endpoints.RevokeAdminEndpoint(dbManager));
+        routes.put("POST /api/staff/:id/avatar", new dnd.server.endpoints.UploadStaffAvatarEndpoint(dbManager));
         
         // Card endpoints
         routes.put("POST /api/cards/issue", new dnd.server.endpoints.IssueCardEndpoint(dbManager));

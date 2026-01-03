@@ -1,6 +1,7 @@
 plugins {
     id 'java'
     id 'application'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 group = 'dnd'
@@ -43,21 +44,24 @@ processResources {
 }
 
 jar {
-    archiveClassifier.set('all')
-
     manifest {
         attributes(
-            'Main-Class': 'dnd.server.MedCardServer'
+            'Main-Class': application.mainClass
         )
     }
-
-    from {
-        configurations.runtimeClasspath.collect {
-            it.isDirectory() ? it : zipTree(it)
-        }
-    }
-
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.named('shadowJar') {
+    archiveBaseName.set('MedCardServer')
+    archiveClassifier.set('all')
+    archiveVersion.set('')
+    mergeServiceFiles()
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.build {
+    dependsOn tasks.shadowJar
 }
 
 

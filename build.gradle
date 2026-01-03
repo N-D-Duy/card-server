@@ -42,21 +42,24 @@ processResources {
     }
 }
 
-// Cấu hình JAR task để có Main-Class trong manifest
 jar {
+    archiveClassifier.set('all')
+
     manifest {
         attributes(
             'Main-Class': 'dnd.server.MedCardServer'
         )
     }
-    
-    // Tạo fat JAR với tất cả dependencies
+
     from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+        configurations.runtimeClasspath.collect {
+            it.isDirectory() ? it : zipTree(it)
+        }
     }
-    
+
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
+
 
 // Task để chạy server
 tasks.register('runServer', JavaExec) {

@@ -1,18 +1,10 @@
-FROM openjdk:17-jdk-slim
+FROM eclipse-temurin:17-jre-jammy
 
 WORKDIR /app
 
-# Copy build files
 COPY build/libs/*.jar app.jar
+COPY *.properties ./
 
-# Copy config files
-COPY db.properties .
-COPY bank.properties .
-COPY minio.properties .
-
-# Expose port
 EXPOSE 8888
 
-# Run application
-CMD ["java", "-jar", "app.jar"]
-
+ENTRYPOINT ["java","-jar","app.jar"]

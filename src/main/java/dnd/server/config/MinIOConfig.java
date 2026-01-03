@@ -10,6 +10,7 @@ import java.util.Properties;
 public class MinIOConfig {
     private static MinIOConfig instance;
     private final String endpoint;
+    private final String publicEndpoint;
     private final String accessKey;
     private final String secretKey;
     private final String bucketName;
@@ -26,6 +27,7 @@ public class MinIOConfig {
             }
             
             this.endpoint = props.getProperty("minio.endpoint", "localhost:9000");
+            this.publicEndpoint = props.getProperty("minio.publicEndpoint", "localhost:9000");
             this.accessKey = props.getProperty("minio.accessKey", "minioadmin");
             this.secretKey = props.getProperty("minio.secretKey", "minioadmin");
             this.bucketName = props.getProperty("minio.bucket", "card");
@@ -43,6 +45,10 @@ public class MinIOConfig {
     
     public String getEndpoint() {
         return endpoint;
+    }
+    
+    public String getPublicEndpoint() {
+        return publicEndpoint;
     }
     
     public String getAccessKey() {

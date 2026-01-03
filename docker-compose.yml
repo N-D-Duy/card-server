@@ -23,9 +23,6 @@ services:
       timeout: 10s
       retries: 3
 
-volumes:
-  minio_data:
-
 networks:
   db_net:
     external: true

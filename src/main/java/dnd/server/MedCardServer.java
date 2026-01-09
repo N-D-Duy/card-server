@@ -16,6 +16,10 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 
 import java.util.logging.Logger;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.HashMap;
 
 /**
  * MedCard Server sử dụng Netty để xử lý HTTP REST API
@@ -30,6 +34,7 @@ public class MedCardServer {
     private DbManager dbManager;
     private boolean running = false;
     private int port;
+    private ScheduledExecutorService scheduler;
 
     public MedCardServer(int port) {
         this.port = port;
@@ -55,6 +60,9 @@ public class MedCardServer {
             throw new RuntimeException("Không thể kết nối database! Kiểm tra file db.properties và đảm bảo MySQL đang chạy.");
         }
         logger.info("✓ Database đã kết nối!");
+
+        // Khởi động scheduled task để tự động hủy đơn thuốc quá 5 phút
+        startPrescriptionTimeoutTask();
 
         // Tạo event loop groups
         bossGroup = new NioEventLoopGroup(1);
@@ -100,6 +108,19 @@ public class MedCardServer {
         running = false;
         logger.info("Đang dừng server...");
 
+        // Dừng scheduled task
+        if (scheduler != null) {
+            scheduler.shutdown();
+            try {
+                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                scheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+
         if (serverChannel != null) {
             serverChannel.close();
         }
@@ -126,6 +147,82 @@ public class MedCardServer {
      */
     public boolean isRunning() {
         return running;
+    }
+
+    /**
+     * Khởi động scheduled task để tự động hủy đơn thuốc quá 5 phút chưa thanh toán
+     */
+    private void startPrescriptionTimeoutTask() {
+        scheduler = Executors.newScheduledThreadPool(1);
+        
+        // Chạy task mỗi 30 giây để kiểm tra và hủy đơn thuốc quá 5 phút
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                cancelExpiredPrescriptions();
+            } catch (Exception e) {
+                logger.warning("Error in prescription timeout task: " + e.getMessage());
+            }
+        }, 30, 30, TimeUnit.SECONDS); // Bắt đầu sau 30s, lặp lại mỗi 30s
+        
+        logger.info("✓ Prescription timeout task đã khởi động (chạy mỗi 30 giây)");
+    }
+
+    /**
+     * Hủy các đơn thuốc đã quá 5 phút chưa được thanh toán
+     */
+    private void cancelExpiredPrescriptions() {
+        try {
+            // Tìm các prescription có status = 0 (Mới) hoặc 1 (Đang xử lý)
+            // và created_at > 5 phút trước, chưa có transaction thanh toán
+            String sql = """
+                SELECT p.id, p.prescription_code, p.created_at
+                FROM prescriptions p
+                WHERE (p.status = 0 OR p.status = 1)
+                  AND p.created_at < DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM transactions t
+                      WHERE t.ref = CONCAT('medcard ', p.id)
+                  )
+                """;
+            
+            java.util.List<HashMap<String, Object>> expiredPrescriptions = dbManager.query(sql);
+            
+            if (expiredPrescriptions.isEmpty()) {
+                return; // Không có đơn nào cần hủy
+            }
+            
+            logger.info("Tìm thấy " + expiredPrescriptions.size() + " đơn thuốc quá 5 phút chưa thanh toán");
+            
+            // Cập nhật status = 3 (Hủy) cho các đơn này
+            String updateSql = """
+                UPDATE prescriptions
+                SET status = 3, updated_at = NOW()
+                WHERE id = ?
+                  AND (status = 0 OR status = 1)
+                  AND created_at < DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM transactions t
+                      WHERE t.ref = CONCAT('medcard ', prescriptions.id)
+                  )
+                """;
+            
+            int cancelledCount = 0;
+            for (HashMap<String, Object> prescription : expiredPrescriptions) {
+                Long prescriptionId = ((Number) prescription.get("id")).longValue();
+                int affected = dbManager.update(updateSql, prescriptionId);
+                if (affected > 0) {
+                    cancelledCount++;
+                    String prescriptionCode = (String) prescription.get("prescription_code");
+                    logger.info("Đã hủy đơn thuốc: " + prescriptionCode + " (ID: " + prescriptionId + ") - quá 5 phút chưa thanh toán");
+                }
+            }
+            
+            if (cancelledCount > 0) {
+                logger.info("Đã tự động hủy " + cancelledCount + " đơn thuốc quá 5 phút");
+            }
+        } catch (Exception e) {
+            logger.warning("Lỗi khi hủy đơn thuốc quá 5 phút: " + e.getMessage());
+        }
     }
 
     /**

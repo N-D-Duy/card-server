@@ -43,29 +43,44 @@ public class GetPrescriptionPaymentStatusEndpoint implements EndpointHandler {
             return Response.badRequest("Invalid prescription ID");
         }
         
-        // Verify prescription exists
+        // Verify prescription exists và lấy status
         HashMap<String, Object> prescription = dbManager.queryOne(
-            "SELECT id FROM prescriptions WHERE id = ?", prescriptionId);
+            "SELECT id, status FROM prescriptions WHERE id = ?", prescriptionId);
         if (prescription == null) {
             return Response.notFound("Prescription not found");
         }
         
-        // Check if there's a transaction with ref matching "medcard {prescriptionId}"
-        String refPattern = "medcard " + prescriptionId;
-        HashMap<String, Object> transaction = dbManager.queryOne(
-            "SELECT id, amount, created_at FROM transactions WHERE ref = ? ORDER BY created_at DESC LIMIT 1",
-            refPattern
-        );
+        Integer prescriptionStatus = prescription.get("status") != null 
+            ? ((Number) prescription.get("status")).intValue() 
+            : null;
         
         Map<String, Object> data = new HashMap<>();
         data.put("prescriptionId", prescriptionId);
         
-        if (transaction != null) {
-            data.put("status", "paid");
-            data.put("transactionId", transaction.get("id"));
-            data.put("amount", transaction.get("amount"));
-            data.put("paidAt", transaction.get("created_at"));
+        // Kiểm tra status trong DB: 0=Mới, 1=Đang xử lý, 2=Hoàn tất, 3=Hủy
+        if (prescriptionStatus != null && prescriptionStatus == 2) {
+            // Status = 2 (Hoàn tất) -> đã thanh toán
+            // Tìm transaction (có thể trong ref hoặc content)
+            String refPattern = "medcard " + prescriptionId;
+            HashMap<String, Object> transaction = dbManager.queryOne(
+                "SELECT id, amount, created_at FROM transactions WHERE ref = ? OR content LIKE ? ORDER BY created_at DESC LIMIT 1",
+                refPattern, "%medcard " + prescriptionId + "%"
+            );
+            
+            if (transaction != null) {
+                data.put("status", "paid");
+                data.put("transactionId", transaction.get("id"));
+                data.put("amount", transaction.get("amount"));
+                data.put("paidAt", transaction.get("created_at"));
+            } else {
+                // Status = 2 nhưng không tìm thấy transaction -> vẫn trả về paid
+                data.put("status", "paid");
+            }
+        } else if (prescriptionStatus != null && prescriptionStatus == 3) {
+            // Status = 3 (Hủy)
+            data.put("status", "cancelled");
         } else {
+            // Status = 0 (Mới) hoặc 1 (Đang xử lý) -> pending
             data.put("status", "pending");
         }
         

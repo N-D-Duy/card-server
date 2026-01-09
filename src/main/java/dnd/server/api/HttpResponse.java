@@ -25,6 +25,24 @@ public class HttpResponse {
     public static HttpResponse success(String message, Object data) {
         Gson gson = new Gson();
         JsonObject json = new JsonObject();
+        
+        // Nếu data là Map và có key "success", merge vào response (cho transaction endpoint)
+        // Format: {"success": true, "message": "...", "transaction_id": "..."}
+        if (data instanceof java.util.Map) {
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> dataMap = (java.util.Map<String, Object>) data;
+            if (dataMap.containsKey("success")) {
+                // Merge tất cả fields từ data vào response, không dùng message từ parameter
+                for (java.util.Map.Entry<String, Object> entry : dataMap.entrySet()) {
+                    if (entry.getValue() != null) {
+                        json.add(entry.getKey(), gson.toJsonTree(entry.getValue()));
+                    }
+                }
+                return new HttpResponse(200, gson.toJson(json));
+            }
+        }
+        
+        // Format mặc định
         json.addProperty("statusCode", 200);
         json.addProperty("message", message);
         if (data != null) {

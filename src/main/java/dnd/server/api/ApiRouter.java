@@ -41,6 +41,7 @@ public class ApiRouter {
         routes.put("PUT /api/prescriptions/:id", new UpdatePrescriptionEndpoint(dbManager));
         routes.put("GET /api/prescriptions/:id/qr-code", new dnd.server.endpoints.GetPrescriptionQrEndpoint(dbManager));
         routes.put("GET /api/prescriptions/:id/payment-status", new dnd.server.endpoints.GetPrescriptionPaymentStatusEndpoint(dbManager));
+        routes.put("POST /api/prescriptions/:id/cancel-payment", new dnd.server.endpoints.CancelPrescriptionPaymentEndpoint(dbManager));
         
         // Inventory endpoints
         routes.put("GET /api/inventory/logs", new InventoryLogsEndpoint(dbManager));

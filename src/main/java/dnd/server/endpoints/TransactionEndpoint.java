@@ -64,7 +64,8 @@ public class TransactionEndpoint implements EndpointHandler {
         // Với thanh toán tiền mặt (do client nội bộ gọi), bỏ qua HMAC
         if (!isCash) {
             // Verify HMAC signature cho giao dịch QR từ bank server
-            String signature = request.headers != null ? request.headers.get("X-Signature") : null;
+            // Headers được lưu dưới dạng lowercase trong HttpRequest
+            String signature = request.headers != null ? request.headers.get("x-signature") : null;
             if (signature == null || signature.trim().isEmpty()) {
                 return Response.error(401, "X-Signature header is required");
             }
@@ -131,8 +132,6 @@ public class TransactionEndpoint implements EndpointHandler {
 
         String content = body.has("content") && !body.get("content").isJsonNull() 
             ? body.get("content").getAsString() : null;
-        String staffId = body.has("staffId") && !body.get("staffId").isJsonNull()
-            ? body.get("staffId").getAsString() : null;
 
         // Ensure transactions table exists
         ensureTransactionsTableExists();
@@ -143,12 +142,59 @@ public class TransactionEndpoint implements EndpointHandler {
         if (existing != null) {
             Long existingId = ((Number) existing.get("id")).longValue();
             Map<String, Object> data = new HashMap<>();
-            data.put("status", "duplicate");
-            data.put("transactionId", existingId);
-            return Response.success("Duplicate", data);
+            data.put("success", true);
+            data.put("message", "Duplicate");
+            data.put("transaction_id", existingId.toString());
+            return Response.success(data);
         }
 
-        // Insert transaction
+        // Check if this is a prescription payment
+        // Prescription ID có thể nằm trong ref (format: "medcard {prescriptionId}") hoặc trong content
+        Long prescriptionId = null;
+        String staffId = null;
+        
+        // Tìm prescription ID từ ref hoặc content
+        String prescriptionIdStr = null;
+        if (ref != null && ref.startsWith("medcard ")) {
+            prescriptionIdStr = ref.substring("medcard ".length()).trim();
+        } else if (content != null && content.contains("medcard ")) {
+            // Tìm "medcard {id}" trong content
+            int medcardIndex = content.indexOf("medcard ");
+            if (medcardIndex >= 0) {
+                String afterMedcard = content.substring(medcardIndex + "medcard ".length());
+                // Lấy số ID (có thể có khoảng trắng hoặc ký tự khác sau)
+                String[] parts = afterMedcard.split("\\s+");
+                if (parts.length > 0) {
+                    prescriptionIdStr = parts[0].trim();
+                }
+            }
+        }
+        
+        if (prescriptionIdStr != null && !prescriptionIdStr.isEmpty()) {
+            try {
+                prescriptionId = Long.parseLong(prescriptionIdStr);
+                logger.info("Transaction linked to prescription: " + prescriptionId);
+                
+                // Lookup prescription để lấy staff_id (ưu tiên pharmacist_staff_id, nếu không có thì dùng doctor_staff_id)
+                String prescriptionSql = "SELECT doctor_staff_id, pharmacist_staff_id, status FROM prescriptions WHERE id = ?";
+                HashMap<String, Object> prescription = dbManager.queryOne(prescriptionSql, prescriptionId);
+                if (prescription != null) {
+                    // Ưu tiên pharmacist_staff_id, nếu không có thì dùng doctor_staff_id
+                    staffId = prescription.get("pharmacist_staff_id") != null 
+                        ? prescription.get("pharmacist_staff_id").toString()
+                        : (prescription.get("doctor_staff_id") != null 
+                            ? prescription.get("doctor_staff_id").toString() 
+                            : null);
+                    logger.info("Found staff_id from prescription: " + staffId);
+                } else {
+                    logger.warning("Prescription not found: " + prescriptionId);
+                }
+            } catch (NumberFormatException e) {
+                logger.warning("Invalid prescription ID format: " + prescriptionIdStr);
+            }
+        }
+
+        // Insert transaction (staff_id sẽ được update sau nếu có prescription)
         String insertSql = """
             INSERT INTO transactions (bank_id, amount, ref, content, staff_id, ts_ms, idempotency_key, payment_method, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
@@ -159,30 +205,37 @@ public class TransactionEndpoint implements EndpointHandler {
             return Response.internalError("Failed to insert transaction");
         }
 
-        // Check if this is a prescription payment (ref format: "medcard {prescriptionId}")
-        Long prescriptionId = null;
-        if (ref != null && ref.startsWith("medcard ")) {
+        // Nếu có prescription, update status và staff_id
+        if (prescriptionId != null && staffId != null) {
             try {
-                String idStr = ref.substring("medcard ".length()).trim();
-                prescriptionId = Long.parseLong(idStr);
-                logger.info("Transaction linked to prescription: " + prescriptionId);
-            } catch (NumberFormatException e) {
-                // Not a prescription payment, ignore
+                // Update prescription status = 2 (Hoàn tất)
+                String updatePrescriptionSql = "UPDATE prescriptions SET status = 2, updated_at = NOW() WHERE id = ?";
+                dbManager.update(updatePrescriptionSql, prescriptionId);
+                logger.info("Updated prescription " + prescriptionId + " status to completed");
+                
+                // Update staff_id vào transaction (nếu chưa có)
+                if (staffId != null) {
+                    String updateTransactionSql = "UPDATE transactions SET staff_id = ? WHERE id = ?";
+                    dbManager.update(updateTransactionSql, staffId, transactionId);
+                }
+            } catch (Exception e) {
+                logger.warning("Failed to update prescription: " + e.getMessage());
             }
         }
 
-        // Update audit_history (result column ở DB là numeric, dùng 1 cho thành công)
-        try {
-            // Một số DB không có cột session_id trong audit_history -> chỉ ghi các trường cơ bản
-            String auditSql = """
-                INSERT INTO audit_history (timestamp, result, staff_id)
-                VALUES (NOW(), ?, ?)
-                """;
-            // result=1 (thành công), chi tiết đã ghi ở system_logs
-            dbManager.update(auditSql, 1, staffId);
-        } catch (Exception e) {
-            // Log error but don't fail transaction
-            logger.warning("Failed to update audit_history: " + e.getMessage());
+        // Update audit_history (chỉ nếu có staffId từ prescription)
+        if (staffId != null && !staffId.trim().isEmpty()) {
+            try {
+                String auditSql = """
+                    INSERT INTO audit_history (timestamp, result, staff_id)
+                    VALUES (NOW(), ?, ?)
+                    """;
+                // result=1 (thành công), chi tiết đã ghi ở system_logs
+                dbManager.update(auditSql, 1, staffId);
+            } catch (Exception e) {
+                // Log error but don't fail transaction
+                logger.warning("Failed to update audit_history: " + e.getMessage());
+            }
         }
 
         // Update system_logs
@@ -199,11 +252,13 @@ public class TransactionEndpoint implements EndpointHandler {
             logger.warning("Failed to update system_logs: " + e.getMessage());
         }
 
+        // Trả về format mà client expect
         Map<String, Object> data = new HashMap<>();
-        data.put("status", "processed");
-        data.put("transactionId", transactionId);
+        data.put("success", true);
+        data.put("message", "OK");
+        data.put("transaction_id", transactionId.toString());
 
-        return Response.success("OK", data);
+        return Response.success(data);
     }
 
     /**
